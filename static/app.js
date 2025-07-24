@@ -1,7 +1,15 @@
-// VTSAX Holdings Tracker JavaScript
+// Multi-Fund Holdings Tracker JavaScript
 
-// API base URL - adjust if running on different port
 const API_BASE = '/api';
+
+// Fund colors for consistent styling
+const FUND_COLORS = {
+    'VTSAX': '#1f77b4',
+    'VOO': '#ff7f0e',
+    'VTI': '#2ca02c',
+    'VUG': '#d62728',
+    'VTV': '#9467bd'
+};
 
 // Format currency
 function formatCurrency(value) {
@@ -15,58 +23,108 @@ function formatCurrency(value) {
 
 // Format percentage
 function formatPercentage(value) {
-    return value.toFixed(2) + '%';
+    return value.toFixed(3) + '%';
 }
 
-// Load stats on page load
-async function loadStats() {
+// Load available funds
+async function loadFunds() {
     try {
-        const response = await fetch(`${API_BASE}/stats`);
+        const response = await fetch(`${API_BASE}/funds`);
         const data = await response.json();
         
-        document.getElementById('total-holdings').textContent = data.total_holdings.toLocaleString();
-        document.getElementById('total-value').textContent = formatCurrency(data.total_market_value);
+        // Display fund badges
+        const badgesContainer = document.getElementById('fund-badges');
+        badgesContainer.innerHTML = '';
         
-        // Update last updated in footer
-        if (data.last_updated) {
-            const date = new Date(data.last_updated);
-            document.getElementById('last-updated').textContent = date.toLocaleDateString();
-        }
+        data.funds.forEach(fund => {
+            const badge = document.createElement('span');
+            badge.className = 'fund-badge';
+            badge.style.backgroundColor = FUND_COLORS[fund.fund_symbol] || '#6c757d';
+            badge.style.color = 'white';
+            badge.textContent = fund.fund_symbol;
+            badge.title = `${fund.fund_name} (${fund.holdings_count} holdings)`;
+            badgesContainer.appendChild(badge);
+        });
+        
+        // Display fund summary cards
+        const summaryContainer = document.getElementById('fund-summary');
+        summaryContainer.innerHTML = '';
+        
+        data.funds.forEach(fund => {
+            const card = `
+                <div class="col-md-4 mb-3">
+                    <div class="card">
+                        <div class="card-body">
+                            <h5 class="card-title">${fund.fund_symbol}</h5>
+                            <p class="card-text">${fund.fund_name}</p>
+                            <div class="d-flex justify-content-between">
+                                <small>${fund.holdings_count} holdings</small>
+                                <small>ER: ${fund.expense_ratio || 'N/A'}</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            summaryContainer.innerHTML += card;
+        });
+        
+        // Load top holdings for each fund
+        loadTopHoldingsByFund(data.funds);
+        
     } catch (error) {
-        console.error('Error loading stats:', error);
+        console.error('Error loading funds:', error);
     }
 }
 
-// Load top holdings
-async function loadTopHoldings() {
-    try {
-        const response = await fetch(`${API_BASE}/holdings/top?limit=10`);
-        const data = await response.json();
-        
-        const tbody = document.getElementById('top-holdings-table');
-        tbody.innerHTML = '';
-        
-        data.holdings.forEach(holding => {
-            const row = `
-                <tr>
-                    <td>${holding.rank}</td>
-                    <td><strong>${holding.ticker}</strong></td>
-                    <td>${holding.company_name}</td>
-                    <td>${formatPercentage(holding.percentage)}</td>
-                    <td>${formatCurrency(holding.market_value)}</td>
-                </tr>
+// Load top holdings for each fund
+async function loadTopHoldingsByFund(funds) {
+    const accordionContainer = document.getElementById('fundAccordion');
+    accordionContainer.innerHTML = '';
+    
+    for (const fund of funds) {
+        try {
+            const response = await fetch(`${API_BASE}/holdings/${fund.fund_symbol}/top?limit=10`);
+            const data = await response.json();
+            
+            const accordionItem = `
+                <div class="accordion-item">
+                    <h2 class="accordion-header" id="heading${fund.fund_symbol}">
+                        <button class="accordion-button collapsed" type="button" 
+                                data-bs-toggle="collapse" data-bs-target="#collapse${fund.fund_symbol}">
+                            ${fund.fund_symbol} - Top 10 Holdings
+                        </button>
+                    </h2>
+                    <div id="collapse${fund.fund_symbol}" class="accordion-collapse collapse" 
+                         data-bs-parent="#fundAccordion">
+                        <div class="accordion-body">
+                            <table class="table table-sm">
+                                <thead>
+                                    <tr>
+                                        <th>Ticker</th>
+                                        <th>Company</th>
+                                        <th>% of Fund</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${data.holdings.map(h => `
+                                        <tr>
+                                            <td><strong>${h.ticker}</strong></td>
+                                            <td>${h.company_name}</td>
+                                            <td>${formatPercentage(h.percentage)}</td>
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
             `;
-            tbody.innerHTML += row;
-        });
-        
-        // Update top holding stat
-        if (data.holdings.length > 0) {
-            const topHolding = data.holdings[0];
-            document.getElementById('top-holding').innerHTML = 
-                `<strong>${topHolding.ticker}</strong> (${formatPercentage(topHolding.percentage)})`;
+            
+            accordionContainer.innerHTML += accordionItem;
+            
+        } catch (error) {
+            console.error(`Error loading holdings for ${fund.fund_symbol}:`, error);
         }
-    } catch (error) {
-        console.error('Error loading top holdings:', error);
     }
 }
 
@@ -86,48 +144,55 @@ async function performSearch(query) {
         loadingDiv.classList.add('d-none');
         
         if (data.found) {
-            // Display results
-            data.results.forEach(result => {
-                const resultCard = `
-                    <div class="card result-card owned mb-3 fade-in">
+            // Show summary
+            const summaryCard = `
+                <div class="alert alert-success">
+                    <h5>✓ Found "${query}" in ${data.total_funds} fund${data.total_funds > 1 ? 's' : ''}</h5>
+                </div>
+            `;
+            resultsDiv.innerHTML = summaryCard;
+            
+            // Display results by fund
+            data.funds.forEach(fund => {
+                const fundCard = `
+                    <div class="card fund-result-card fund-${fund.fund_symbol} mb-3 fade-in">
                         <div class="card-body">
-                            <div class="row align-items-center">
-                                <div class="col-md-8">
-                                    <h4 class="card-title">
-                                        <span class="text-success">✓</span>
-                                        ${result.ticker} - ${result.company_name}
-                                    </h4>
-                                    <p class="mb-0">
-                                        Yes! You own this stock through VTSAX
-                                    </p>
-                                </div>
-                                <div class="col-md-4 text-md-end">
-                                    <div class="h5 mb-0 text-vanguard">${formatPercentage(result.percentage)}</div>
-                                    <small class="text-muted">of fund</small>
-                                    <div class="mt-2">
-                                        <small class="text-muted">
-                                            ${result.shares.toLocaleString()} shares<br>
-                                            ${formatCurrency(result.market_value)}
-                                        </small>
+                            <h5 class="card-title">
+                                <span class="badge" style="background-color: ${FUND_COLORS[fund.fund_symbol] || '#6c757d'}">
+                                    ${fund.fund_symbol}
+                                </span>
+                                ${fund.fund_name}
+                            </h5>
+                            <div class="holdings-grid">
+                                ${fund.holdings.map(holding => `
+                                    <div class="holding-card">
+                                        <strong>${holding.ticker}</strong>
+                                        <br>${holding.company_name}
+                                        <br><span class="text-primary">${formatPercentage(holding.percentage)}</span>
+                                        <br><small class="text-muted">${holding.shares.toLocaleString()} shares</small>
                                     </div>
-                                </div>
+                                `).join('')}
                             </div>
                         </div>
                     </div>
                 `;
-                resultsDiv.innerHTML += resultCard;
+                resultsDiv.innerHTML += fundCard;
             });
+            
+            // Also check which funds DON'T have this stock
+            checkMissingFunds(query);
+            
         } else {
-            // Not found
+            // Not found in any fund
             const notFoundCard = `
                 <div class="card result-card not-owned mb-3 fade-in">
                     <div class="card-body">
                         <h4 class="card-title">
                             <span class="text-warning">✗</span>
-                            "${query}" not found in VTSAX
+                            "${query}" not found in any tracked funds
                         </h4>
                         <p class="mb-0">
-                            This stock is not part of the Vanguard Total Stock Market Index Fund
+                            This stock is not part of any index funds you're tracking
                         </p>
                     </div>
                 </div>
@@ -145,28 +210,52 @@ async function performSearch(query) {
     }
 }
 
-// Load usage stats
-async function loadUsageStats() {
+// Check which funds don't contain the stock
+async function checkMissingFunds(ticker) {
     try {
-        const response = await fetch(`${API_BASE}/usage`);
+        // Get list of funds that contain the stock
+        const response = await fetch(`${API_BASE}/stock/${ticker}/funds`);
         const data = await response.json();
         
-        // Display warnings if any
-        if (data.warnings && data.warnings.length > 0) {
-            const warningDiv = document.createElement('div');
-            warningDiv.className = 'alert alert-warning alert-dismissible fade show';
-            warningDiv.innerHTML = `
-                <strong>Usage Warning:</strong> 
-                ${data.warnings.map(w => w.message).join(', ')}
-                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-            `;
-            document.querySelector('.container').prepend(warningDiv);
+        if (data.found) {
+            const fundsWithStock = data.funds.map(f => f.fund_symbol);
+            
+            // Get all available funds
+            const allFundsResponse = await fetch(`${API_BASE}/funds`);
+            const allFundsData = await allFundsResponse.json();
+            
+            const missingFunds = allFundsData.funds.filter(
+                f => !fundsWithStock.includes(f.fund_symbol)
+            );
+            
+            if (missingFunds.length > 0) {
+                const missingCard = `
+                    <div class="alert alert-info mt-3">
+                        <strong>Not found in:</strong> 
+                        ${missingFunds.map(f => f.fund_symbol).join(', ')}
+                    </div>
+                `;
+                document.getElementById('search-results').innerHTML += missingCard;
+            }
         }
-        
-        // Log to console for monitoring
-        console.log('Usage Stats:', data);
     } catch (error) {
-        console.error('Error loading usage stats:', error);
+        console.error('Error checking missing funds:', error);
+    }
+}
+
+// Load stats
+async function loadStats() {
+    try {
+        const response = await fetch(`${API_BASE}/stats`);
+        const data = await response.json();
+        
+        // Update last updated in footer
+        if (data.last_updated) {
+            const date = new Date(data.last_updated);
+            document.getElementById('last-updated').textContent = date.toLocaleDateString();
+        }
+    } catch (error) {
+        console.error('Error loading stats:', error);
     }
 }
 
@@ -174,8 +263,7 @@ async function loadUsageStats() {
 document.addEventListener('DOMContentLoaded', function() {
     // Load initial data
     loadStats();
-    loadTopHoldings();
-    loadUsageStats();  // Monitor usage
+    loadFunds();
     
     // Search form handler
     const searchForm = document.getElementById('search-form');

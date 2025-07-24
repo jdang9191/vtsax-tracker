@@ -2,7 +2,7 @@
 Migrate from single-fund database to multi-fund database
 """
 
-from database_v2 import MultiFundDatabase
+from database import MultiFundDatabase
 import os
 
 def migrate():

@@ -1,6 +1,7 @@
 from flask import Flask, render_template, jsonify, request
 from flask_cors import CORS
-from database import HoldingsDatabase
+from database import MultiFundDatabase
+from funds_config import SUPPORTED_FUNDS
 import sqlite3
 from datetime import datetime
 from free_tier_limiter import limiter, rate_limit, conditional_cache, ServiceDegrader
@@ -8,7 +9,7 @@ from safe_cache import cache, CacheFallback, get_with_fallback
 
 app = Flask(__name__)
 CORS(app)
-db = HoldingsDatabase()
+db = MultiFundDatabase()
 degrader = ServiceDegrader()
 static_fallback = CacheFallback()
 
@@ -19,18 +20,10 @@ def index():
     """Main search page"""
     return render_template('index.html')
 
-@app.route('/top-holdings')
-def top_holdings_page():
-    """Top holdings page"""
-    # You can create this template later if needed
-    return render_template('index.html')  # For now, redirect to main page
-
-@app.route('/api-docs')
-def api_docs():
-    """API documentation page"""
-    # For now, just redirect to main page
-    # You can create a proper docs template later
-    return render_template('index.html')
+@app.route('/funds')
+def funds_page():
+    """Page showing all available funds"""
+    return render_template('funds.html')
 
 # ===== API Routes =====
 
@@ -38,46 +31,73 @@ def api_docs():
 @rate_limit('api_requests')
 @conditional_cache('api_requests')
 def api_search():
-    """Search for holdings by ticker or company name"""
+    """Search for holdings across all funds"""
     query = request.args.get('q', '').strip()
+    fund = request.args.get('fund', '').strip()  # Optional: filter by specific fund
     
     if not query:
         return jsonify({'error': 'Missing search query parameter "q"'}), 400
     
     # Check cache first
-    cache_key = f"search:{query.lower()}"
+    cache_key = f"search:{query.lower()}:{fund}" if fund else f"search:{query.lower()}"
     cached_result = cache.get(cache_key)
     if cached_result:
-        print('cache')
         return jsonify(cached_result)
-        
     
     # Get service level for degradation
     service_level = limiter.get_service_level()
     
-    # Query database with rate limiting
+    # Query database
     @rate_limit('database_queries')
     def query_db():
-        print('database query')
-        return db.search_stock(query)
+        if fund:
+            return db.search_stock_in_fund(query, fund)
+        else:
+            return db.search_stock(query)
     
     results = query_db()
     
     if results:
-        formatted_results = []
-        for idx, result in enumerate(results):
-            formatted_results.append({
-                'ticker': result[3],
-                'company_name': result[2],
-                'percentage': float(result[4]),
-                'market_value': float(result[10]),
-                'shares': int(result[11]),
-                'rank': idx + 1
+        # Group results by fund
+        funds_data = {}
+        for result in results:
+            if fund:  # Single fund search
+                fund_symbol = fund
+                ticker = result[3]
+                company_name = result[2]
+                percentage = float(result[4])
+                market_value = float(result[10])
+                shares = int(result[11])
+            else:  # Multi-fund search
+                # Columns: id, fund_symbol, sedol, holdings, ticker, percentage, sector, country, ... market_value, shares, last_updated, fund_name
+                fund_symbol = result[1]
+                fund_name = result[14]   # fund_name from join (last column)
+                ticker = result[4]
+                company_name = result[3]
+                percentage = float(result[5])
+                market_value = float(result[11])
+                shares = int(result[12])
+            
+            if fund_symbol not in funds_data:
+                funds_data[fund_symbol] = {
+                    'fund_symbol': fund_symbol,
+                    'fund_name': fund_name if not fund else SUPPORTED_FUNDS.get(fund, {}).get('name', fund),
+                    'holdings': []
+                }
+            
+            funds_data[fund_symbol]['holdings'].append({
+                'ticker': ticker,
+                'company_name': company_name,
+                'percentage': percentage,
+                'market_value': market_value,
+                'shares': shares
             })
+        
         response_data = {
             'found': True,
             'query': query,
-            'results': formatted_results
+            'funds': list(funds_data.values()),
+            'total_funds': len(funds_data)
         }
         
         # Apply degradation if needed
@@ -97,9 +117,31 @@ def api_search():
             'message': f'No holdings found for "{query}"'
         })
 
-@app.route('/api/holdings/top', methods=['GET'])
-def api_top_holdings():
-    """Get top holdings by percentage"""
+@app.route('/api/funds', methods=['GET'])
+def api_get_funds():
+    """Get list of all available funds"""
+    funds = db.get_all_funds()
+    
+    formatted_funds = []
+    for fund in funds:
+        formatted_funds.append({
+            'fund_symbol': fund[0],
+            'fund_name': fund[1],
+            'description': fund[2],
+            'expense_ratio': fund[3],
+            'last_updated': fund[4],
+            'holdings_count': fund[5]
+        })
+    
+    return jsonify({
+        'funds': formatted_funds,
+        'supported_funds': SUPPORTED_FUNDS
+    })
+
+@app.route('/api/holdings/<fund_symbol>/top', methods=['GET'])
+@rate_limit('api_requests')
+def api_fund_top_holdings(fund_symbol):
+    """Get top holdings for a specific fund"""
     try:
         limit = int(request.args.get('limit', 10))
         limit = min(limit, 100)
@@ -107,7 +149,7 @@ def api_top_holdings():
     except ValueError:
         return jsonify({'error': 'Invalid limit parameter'}), 400
     
-    holdings = db.get_all_holdings()[:limit]
+    holdings = db.get_all_holdings(fund_symbol)[:limit]
     
     formatted_holdings = []
     for idx, holding in enumerate(holdings):
@@ -119,70 +161,66 @@ def api_top_holdings():
             'rank': idx + 1
         })
     
+    fund_info = SUPPORTED_FUNDS.get(fund_symbol, {})
+    
     return jsonify({
+        'fund_symbol': fund_symbol,
+        'fund_name': fund_info.get('name', fund_symbol),
         'count': len(formatted_holdings),
         'holdings': formatted_holdings
     })
 
-@app.route('/api/owns/<ticker>', methods=['GET'])
-def api_check_ownership(ticker):
-    """Check if you own a specific stock through VTSAX"""
-    ticker = ticker.upper().strip()
+@app.route('/api/stock/<ticker>/funds', methods=['GET'])
+def api_stock_in_funds(ticker):
+    """Get all funds that contain a specific stock"""
+    funds = db.get_funds_containing_stock(ticker)
     
-    results = db.search_stock(ticker)
-    
-    exact_match = None
-    for result in results:
-        if result[3] == ticker:
-            exact_match = result
-            break
-    
-    if exact_match:
-        percentage = float(exact_match[4])
+    if funds:
+        formatted_funds = []
+        for fund in funds:
+            formatted_funds.append({
+                'fund_symbol': fund[0],
+                'fund_name': fund[1],
+                'percentage': float(fund[2]),
+                'shares': int(fund[3]),
+                'market_value': float(fund[4])
+            })
+        
         return jsonify({
-            'owns': True,
-            'ticker': ticker,
-            'company_name': exact_match[2],
-            'percentage': percentage,
-            'market_value': float(exact_match[10]),
-            'shares': int(exact_match[11]),
-            'message': f'Yes, you own {exact_match[2]} through VTSAX ({percentage:.2f}% of fund)'
+            'found': True,
+            'ticker': ticker.upper(),
+            'funds': formatted_funds,
+            'total_funds': len(formatted_funds)
         })
     else:
         return jsonify({
-            'owns': False,
-            'ticker': ticker,
-            'message': f'No, you do not own {ticker} through VTSAX'
+            'found': False,
+            'ticker': ticker.upper(),
+            'message': f'{ticker.upper()} not found in any tracked funds'
         })
 
 @app.route('/api/stats', methods=['GET'])
 def api_get_statistics():
-    """Get database statistics and metadata"""
+    """Get database statistics"""
     stats = db.get_stats()
-    
-    conn = sqlite3.connect(db.db_path)
-    cursor = conn.cursor()
-    
-    cursor.execute("SELECT SUM(market_value) FROM holdings")
-    total_value = cursor.fetchone()[0]
-    
-    cursor.execute("SELECT MAX(date_added) FROM holdings")
-    last_updated = cursor.fetchone()[0]
-    
-    conn.close()
     
     return jsonify({
         'total_holdings': stats['unique_stocks'],
-        'last_updated': last_updated,
-        'total_market_value': float(total_value) if total_value else 0,
-        'data_source': 'VTSAX',
-        'fund_name': 'Vanguard Total Stock Market Index Fund Admiral Shares'
+        'total_funds': stats['total_funds'],
+        'last_updated': stats['latest_update'],
+        'fund_details': [
+            {
+                'fund_symbol': fund[0],
+                'fund_name': fund[1],
+                'holdings_count': fund[2]
+            } for fund in stats['fund_stats']
+        ]
     })
 
 @app.route('/api/health', methods=['GET'])
 def api_health_check():
     """Health check endpoint"""
-    return jsonify({'status': 'healthy', 'service': 'VTSAX Holdings API'})
+    return jsonify({'status': 'healthy', 'service': 'Multi-Fund Holdings API'})
 
 @app.route('/api/usage', methods=['GET'])
 def api_usage_stats():
@@ -224,15 +262,17 @@ def internal_error(error):
 
 if __name__ == '__main__':
     print("\n" + "="*50)
-    print("VTSAX Holdings Tracker")
+    print("Multi-Fund Holdings Tracker")
     print("="*50)
-    print("\nWeb UI available at: http://localhost:5000")
+    print("\nWeb UI available at: http://localhost:8080")
     print("\nAPI Endpoints:")
-    print("  GET /api/search?q=<query>")
-    print("  GET /api/holdings/top?limit=<n>")
-    print("  GET /api/owns/<ticker>")
+    print("  GET /api/search?q=<query>&fund=<optional>")
+    print("  GET /api/funds")
+    print("  GET /api/holdings/<fund>/top?limit=<n>")
+    print("  GET /api/stock/<ticker>/funds")
     print("  GET /api/stats")
     print("  GET /api/health")
+    print("  GET /api/usage")
     print("\n" + "="*50 + "\n")
     
     app.run(debug=True, port=8080, host='127.0.0.1')
