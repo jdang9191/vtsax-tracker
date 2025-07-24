@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Multi-Fund API</title>
+</head>
+<body>
+    <h1>Multi-Fund API Test</h1>
+    <button onclick="testSearch()">Test Search AAPL</button>
+    <button onclick="testFunds()">Test Get Funds</button>
+    <button onclick="testTopHoldings()">Test Top Holdings</button>
+    
+    <pre id="output"></pre>
+
+    <script>
+        async function testSearch() {
+            try {
+                const response = await fetch('http://localhost:8080/api/search?q=AAPL');
+                const data = await response.json();
+                document.getElementById('output').textContent = JSON.stringify(data, null, 2);
+            } catch (error) {
+                document.getElementById('output').textContent = 'Error: ' + error.message;
+            }
+        }
+
+        async function testFunds() {
+            try {
+                const response = await fetch('http://localhost:8080/api/funds');
+                const data = await response.json();
+                document.getElementById('output').textContent = JSON.stringify(data, null, 2);
+            } catch (error) {
+                document.getElementById('output').textContent = 'Error: ' + error.message;
+            }
+        }
+
+        async function testTopHoldings() {
+            try {
+                const response = await fetch('http://localhost:8080/api/holdings/VOO/top?limit=5');
+                const data = await response.json();
+                document.getElementById('output').textContent = JSON.stringify(data, null, 2);
+            } catch (error) {
+                document.getElementById('output').textContent = 'Error: ' + error.message;
+            }
+        }
+    </script>
+</body>
+</html>

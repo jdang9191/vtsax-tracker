@@ -112,12 +112,13 @@ def scrape_fund(fund_symbol, fund_config, download_dir):
 def process_csv(csv_path, fund_symbol, fund_config):
     """Process the downloaded CSV file"""
     try:
-        # Read and find data start
-        df = pd.read_csv(csv_path)
+        # Read file line by line to find where data starts
+        with open(csv_path, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
         
         header_row_idx = None
-        for idx, row in df.iterrows():
-            if 'SEDOL' in str(row.values):
+        for idx, line in enumerate(lines):
+            if 'SEDOL' in line and 'TICKER' in line:
                 header_row_idx = idx
                 break
         
@@ -128,12 +129,33 @@ def process_csv(csv_path, fund_symbol, fund_config):
             # Clean column names
             df.columns = df.columns.str.strip()
             
-            # Clean and prepare data
-            df['% OF FUNDS*'] = df['% OF FUNDS*'].str.rstrip('%')
-            df['% OF FUNDS*'] = df['% OF FUNDS*'].str.replace('<', '')
-            df['% OF FUNDS*'] = pd.to_numeric(df['% OF FUNDS*'], errors='coerce')
+            # Handle VOO format (has empty first column)
+            if df.columns[0] == '' or pd.isna(df.columns[0]):
+                # Drop the empty first column
+                df = df.iloc[:, 1:]
+                # Reset column names
+                df.columns = df.columns.str.strip()
             
-            df['MARKET VALUE'] = df['MARKET VALUE'].str.replace('$', '').str.replace(',', '').astype(float)
+            # Debug: print column names
+            print(f"Columns found: {df.columns.tolist()}")
+            
+            # Clean and prepare data
+            # Handle different column name formats
+            pct_col = '% OF FUNDS*' if '% OF FUNDS*' in df.columns else '% OF FUND*' if '% OF FUND*' in df.columns else None
+            mkt_val_col = 'MARKET VALUE' if 'MARKET VALUE' in df.columns else 'MARKET VALUE*' if 'MARKET VALUE*' in df.columns else None
+            
+            if pct_col:
+                df['% OF FUNDS*'] = df[pct_col].str.rstrip('%')
+                df['% OF FUNDS*'] = df['% OF FUNDS*'].str.replace('<', '')
+                df['% OF FUNDS*'] = pd.to_numeric(df['% OF FUNDS*'], errors='coerce')
+            
+            if mkt_val_col:
+                # Rename the column to standard name
+                if mkt_val_col != 'MARKET VALUE':
+                    df['MARKET VALUE'] = df[mkt_val_col]
+                df['MARKET VALUE'] = df['MARKET VALUE'].str.replace('$', '').str.replace(',', '')
+                df['MARKET VALUE'] = pd.to_numeric(df['MARKET VALUE'], errors='coerce')
+            
             df['SHARES'] = df['SHARES'].str.replace(',', '')
             df['SHARES'] = pd.to_numeric(df['SHARES'], errors='coerce').fillna(0).astype('int64')
             

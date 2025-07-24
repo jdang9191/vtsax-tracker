@@ -69,13 +69,14 @@ def api_search():
                 market_value = float(result[10])
                 shares = int(result[11])
             else:  # Multi-fund search
-                fund_symbol = result[1]  # fund_symbol from join
-                fund_name = result[13]   # fund_name from join
-                ticker = result[3]
-                company_name = result[2]
-                percentage = float(result[4])
-                market_value = float(result[10])
-                shares = int(result[11])
+                # Columns: id, fund_symbol, sedol, holdings, ticker, percentage, sector, country, ... market_value, shares, last_updated, fund_name
+                fund_symbol = result[1]
+                fund_name = result[14]   # fund_name from join (last column)
+                ticker = result[4]
+                company_name = result[3]
+                percentage = float(result[5])
+                market_value = float(result[11])
+                shares = int(result[12])
             
             if fund_symbol not in funds_data:
                 funds_data[fund_symbol] = {
