@@ -3,10 +3,14 @@ from flask_cors import CORS
 from database import HoldingsDatabase
 import sqlite3
 from datetime import datetime
+from free_tier_limiter import limiter, rate_limit, conditional_cache, ServiceDegrader
+from safe_cache import cache, CacheFallback, get_with_fallback
 
 app = Flask(__name__)
 CORS(app)
 db = HoldingsDatabase()
+degrader = ServiceDegrader()
+static_fallback = CacheFallback()
 
 # ===== UI Routes =====
 
@@ -31,6 +35,8 @@ def api_docs():
 # ===== API Routes =====
 
 @app.route('/api/search', methods=['GET'])
+@rate_limit('api_requests')
+@conditional_cache('api_requests')
 def api_search():
     """Search for holdings by ticker or company name"""
     query = request.args.get('q', '').strip()
@@ -38,7 +44,24 @@ def api_search():
     if not query:
         return jsonify({'error': 'Missing search query parameter "q"'}), 400
     
-    results = db.search_stock(query)
+    # Check cache first
+    cache_key = f"search:{query.lower()}"
+    cached_result = cache.get(cache_key)
+    if cached_result:
+        print('cache')
+        return jsonify(cached_result)
+        
+    
+    # Get service level for degradation
+    service_level = limiter.get_service_level()
+    
+    # Query database with rate limiting
+    @rate_limit('database_queries')
+    def query_db():
+        print('database query')
+        return db.search_stock(query)
+    
+    results = query_db()
     
     if results:
         formatted_results = []
@@ -51,11 +74,22 @@ def api_search():
                 'shares': int(result[11]),
                 'rank': idx + 1
             })
-        return jsonify({
+        response_data = {
             'found': True,
             'query': query,
             'results': formatted_results
-        })
+        }
+        
+        # Apply degradation if needed
+        if service_level != 'normal':
+            response_data = degrader.degrade_response(response_data, service_level)
+            response_data['service_level'] = service_level
+        
+        # Cache the response
+        cache_ttl = 300 if service_level == 'normal' else 3600
+        cache.set(cache_key, response_data, cache_ttl)
+        
+        return jsonify(response_data)
     else:
         return jsonify({
             'found': False,
@@ -149,6 +183,31 @@ def api_get_statistics():
 def api_health_check():
     """Health check endpoint"""
     return jsonify({'status': 'healthy', 'service': 'VTSAX Holdings API'})
+
+@app.route('/api/usage', methods=['GET'])
+def api_usage_stats():
+    """Get usage statistics for free tier monitoring"""
+    return jsonify({
+        'limits': limiter.get_all_usage_stats(),
+        'cache': cache.get_usage_stats(),
+        'service_level': limiter.get_service_level(),
+        'warnings': _get_usage_warnings()
+    })
+
+def _get_usage_warnings():
+    """Get any usage warnings"""
+    warnings = []
+    stats = limiter.get_all_usage_stats()
+    
+    for service, data in stats.items():
+        if data['percentage'] > 80:
+            warnings.append({
+                'service': service,
+                'message': f"{service} at {data['percentage']:.1f}% of limit",
+                'severity': 'critical' if data['percentage'] > 90 else 'warning'
+            })
+    
+    return warnings
 
 # Error handlers
 @app.errorhandler(404)

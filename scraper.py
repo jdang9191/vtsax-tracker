@@ -36,21 +36,53 @@ prefs = {
 chrome_options = webdriver.ChromeOptions()
 chrome_options.add_experimental_option("prefs", prefs)
 
+# Add options to avoid detection
+chrome_options.add_argument('--disable-blink-features=AutomationControlled')
+chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+chrome_options.add_experimental_option('useAutomationExtension', False)
+chrome_options.add_argument('--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+
+# Optional: Run in headless mode
+# chrome_options.add_argument('--headless')
+
 #opens website
 driver = webdriver.Chrome(
     service=ChromeService(ChromeDriverManager().install()),
     options=chrome_options
 )
+
+# Execute script to remove webdriver property
+driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
 driver.get('https://advisors.vanguard.com/investments/products/vtsax/vanguard-total-stock-market-index-fund-admiral-shares#literatureandinsights')
 
-wait = WebDriverWait(driver, 15)
+wait = WebDriverWait(driver, 30)  # Increased timeout
 
-time.sleep(10) # wait for page to load and render button
+print("Waiting for page to fully load...")
+time.sleep(15)  # Increased wait time for page to load
 
-
-export_element = wait.until(EC.element_to_be_clickable(
-    (By.XPATH, "//*[normalize-space(text())='Export full holdings']")
-))
+# Try multiple methods to find the button
+print("Looking for export button...")
+try:
+    # Method 1: Wait for button with exact text
+    export_element = wait.until(EC.element_to_be_clickable(
+        (By.XPATH, "//*[normalize-space(text())='Export full holdings']")
+    ))
+except:
+    try:
+        # Method 2: Try partial text match
+        export_element = driver.find_element(By.XPATH, "//*[contains(text(), 'Export')]")
+    except:
+        try:
+            # Method 3: Try finding by class or other attributes
+            export_element = driver.find_element(By.XPATH, "//button[contains(., 'Export')]")
+        except:
+            # Take a screenshot for debugging
+            driver.save_screenshot("page_screenshot.png")
+            print("Could not find export button. Screenshot saved as page_screenshot.png")
+            print("Current URL:", driver.current_url)
+            print("Page title:", driver.title)
+            driver.quit()
+            exit(1)
 driver.execute_script('arguments[0].scrollIntoView(true);', export_element)
 driver.execute_script('arguments[0].click();', export_element)
 
@@ -105,7 +137,11 @@ if csv_files:
         df['SHARES'] = df['SHARES'].str.replace(',', '')
         df['SHARES'] = pd.to_numeric(df['SHARES'], errors='coerce').fillna(0).astype('int64')
         
-        print("\nData cleaned and ready for database storage")
+        # Remove any rows where ticker or holdings name is null/empty
+        df = df.dropna(subset=['TICKER', 'HOLDINGS'])
+        df = df[df['TICKER'].str.strip() != '']
+        
+        print(f"\nData cleaned and ready for database storage ({len(df)} valid holdings)")
         
         # Import and use the database
         from database import HoldingsDatabase

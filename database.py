@@ -103,3 +103,23 @@ class HoldingsDatabase:
         conn.close()
         
         return results
+    
+    def get_stats(self):
+        """Get database statistics"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        # Count unique stocks
+        cursor.execute("SELECT COUNT(DISTINCT ticker) FROM holdings")
+        unique_stocks = cursor.fetchone()[0]
+        
+        # Get latest date
+        cursor.execute("SELECT MAX(date_added) FROM holdings")
+        latest_scrape = cursor.fetchone()[0]
+        
+        conn.close()
+        
+        return {
+            'unique_stocks': unique_stocks,
+            'latest_scrape': latest_scrape
+        }

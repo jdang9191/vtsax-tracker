@@ -145,11 +145,37 @@ async function performSearch(query) {
     }
 }
 
+// Load usage stats
+async function loadUsageStats() {
+    try {
+        const response = await fetch(`${API_BASE}/usage`);
+        const data = await response.json();
+        
+        // Display warnings if any
+        if (data.warnings && data.warnings.length > 0) {
+            const warningDiv = document.createElement('div');
+            warningDiv.className = 'alert alert-warning alert-dismissible fade show';
+            warningDiv.innerHTML = `
+                <strong>Usage Warning:</strong> 
+                ${data.warnings.map(w => w.message).join(', ')}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            `;
+            document.querySelector('.container').prepend(warningDiv);
+        }
+        
+        // Log to console for monitoring
+        console.log('Usage Stats:', data);
+    } catch (error) {
+        console.error('Error loading usage stats:', error);
+    }
+}
+
 // Initialize page
 document.addEventListener('DOMContentLoaded', function() {
     // Load initial data
     loadStats();
     loadTopHoldings();
+    loadUsageStats();  // Monitor usage
     
     // Search form handler
     const searchForm = document.getElementById('search-form');
