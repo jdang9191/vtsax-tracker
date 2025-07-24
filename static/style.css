@@ -1,0 +1,138 @@
+/* VTSAX Holdings Tracker Styles */
+
+:root {
+    --vanguard-red: #8b0000;
+    --vanguard-red-light: #a52a2a;
+    --success-green: #28a745;
+    --warning-yellow: #ffc107;
+    --light-gray: #f8f9fa;
+}
+
+/* Navigation */
+.navbar {
+    background-color: var(--vanguard-red) !important;
+}
+
+.navbar-brand {
+    font-weight: bold;
+    font-size: 1.5rem;
+}
+
+/* Search Section */
+#search-input {
+    border-radius: 0.5rem 0 0 0.5rem;
+}
+
+#search-form button {
+    border-radius: 0 0.5rem 0.5rem 0;
+}
+
+.quick-search {
+    color: var(--vanguard-red);
+    text-decoration: none;
+    margin: 0 5px;
+}
+
+.quick-search:hover {
+    text-decoration: underline;
+}
+
+/* Results Cards */
+.result-card {
+    border-left: 4px solid transparent;
+    transition: all 0.3s ease;
+}
+
+.result-card.owned {
+    border-left-color: var(--success-green);
+}
+
+.result-card.not-owned {
+    border-left-color: var(--warning-yellow);
+}
+
+.result-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+}
+
+/* Holdings Table */
+.table th {
+    background-color: var(--light-gray);
+    font-weight: 600;
+}
+
+.percentage-bar {
+    height: 20px;
+    background-color: var(--vanguard-red);
+    border-radius: 10px;
+    position: relative;
+}
+
+.percentage-text {
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: white;
+    font-size: 0.8rem;
+}
+
+/* Stats Cards */
+.card {
+    border: none;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    transition: transform 0.2s;
+}
+
+.card:hover {
+    transform: translateY(-2px);
+}
+
+/* Footer */
+footer {
+    margin-top: auto;
+    border-top: 1px solid #dee2e6;
+}
+
+/* Loading Animation */
+.spinner-border {
+    width: 3rem;
+    height: 3rem;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .display-4 {
+        font-size: 2.5rem;
+    }
+    
+    .stats-card {
+        margin-bottom: 1rem;
+    }
+}
+
+/* Utility Classes */
+.text-vanguard {
+    color: var(--vanguard-red);
+}
+
+.bg-vanguard {
+    background-color: var(--vanguard-red);
+}
+
+/* Animations */
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.fade-in {
+    animation: fadeIn 0.3s ease-out;
+}
