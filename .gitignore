@@ -1,17 +1,29 @@
-# Ignore virtual environment
+# Python
 venv/
-
-# Ignore Python bytecode
+*.pyc
 __pycache__/
-*.py[cod]
+.Python
+env/
+*.egg-info/
 
-# Ignore data or cache files (optional)
-*.csv
-*.json
-*.sqlite3
+# Database
+*.db
 
-# Ignore Jupyter notebooks checkpoints (if used)
-.ipynb_checkpoints/
+# Static cache files
+static/cache/
 
-# Ignore environment files
+# Environment variables
 .env
+
+# IDE
+.vscode/
+.idea/
+
+# Mac
+.DS_Store
+
+# Screenshots from scraper
+*.png
+
+# CSV files
+*.csv
