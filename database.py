@@ -4,7 +4,7 @@ from datetime import datetime
 import os
 
 class MultiFundDatabase:
-    def __init__(self, db_path="index_funds.db"):
+    def __init__(self, db_path="holdings.db"):
         self.db_path = db_path
         self.conn = None
         self.create_tables()
